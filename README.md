@@ -65,6 +65,14 @@ This project implements a complete ML pipeline system that allow users to upload
 #### Option 2: Deploy on Single EC2 Instance or Local (Testing)
 you can run both components on Single EC2 instance or on your local machine
 
+First change the pyspark Session config on ```ml_pipeline.py```:
+
+uncomment the code below to config to local mode for non cluster environments
+```
+.master("local[*])
+```
+
+
 ```
 cd pipeline_backend
 
