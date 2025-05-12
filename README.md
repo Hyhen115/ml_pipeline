@@ -14,14 +14,34 @@ This project implements a complete ML pipeline system that allow users to upload
 
 ## Getting Started
 ### Prerequisites
+- nodejs
 - AWS account
 - Docker
 - Git for cloning the repo
 
 ### Deploy
 #### Option 1: using our setup for the docker container, and your s3, emr cluster
-- Create an EMR Cluster
+- Create an EMR Cluster with spark and hadoop environment(3 worker node recommended)
 - Set Up S3 Bucket on the same AWS location as the EMR Cluster (This Project did not support for cross location communication within AWS services)
+> go to s3 bucket permissions -> Cross-origin resource sharing (CORS) and paste the code below
+```
+[
+    {
+        "AllowedHeaders": [
+            "*"
+        ],
+        "AllowedMethods": [
+            "POST",
+            "PUT",
+            "GET"
+        ],
+        "AllowedOrigins": [
+            "*"
+        ],
+        "ExposeHeaders": []
+    }
+]
+```
 - Deploy Backend to EMR Master Node
   
   Connect to EMR master node:
@@ -65,20 +85,28 @@ This project implements a complete ML pipeline system that allow users to upload
 #### Option 2: Deploy on Single EC2 Instance or Local (Testing)
 you can run both components on Single EC2 instance or on your local machine
 
-First change the pyspark Session config on ```ml_pipeline.py```:
-
-uncomment the code below to config to local mode for non cluster environments
-```
-.master("local[*])
-```
-
+Local build and push your container
 
 ```
 cd pipeline_backend
 
 # Build and push for x86_64 (EC2/EMR compatibility)
-docker buildx build --platform linux/amd64 -t your-repo/ml-pipeline-backend:emr --push .
+docker buildx build --platform linux/amd64 -t your-repo/ml-pipeline-backend --push .
+```
 
+EC2 or local you want to run docker:
+
+```
+# download docker on EC2 ubuntu instance
+
+sudo apt-get update
+
+sudo apt-get install docker.io -y
+
+sudo systemctl enable docker
+```
+
+```
 # Run your custom image
 docker run -d -p 5001:5001 \
   -e AWS_ACCESS_KEY_ID=your_access_key \
@@ -99,7 +127,7 @@ docker run -d -p 5001:5001 \
 | ```/download_model_zip```  | GET    | download the trained model as zip              |
 
 ### Environment Variables
-| Environment Variables| Description                       | Default                           |
+| Endpoint                    | Description                       | Default                           |
 |-----------------------------|-----------------------------------|-----------------------------------|
 | ```AWS_ACCESS_KEY_ID```     | aws access key id                 | Required                          |
 | ```AWS_SECRET_ACCESS_KEY``` | the secret key for the access key | Required                          |
