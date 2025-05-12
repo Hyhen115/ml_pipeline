@@ -99,7 +99,7 @@ docker run -d -p 5001:5001 \
 | ```/download_model_zip```  | GET    | download the trained model as zip              |
 
 ### Environment Variables
-| Endpoint                    | Description                       | Default                           |
+| Environment Variables| Description                       | Default                           |
 |-----------------------------|-----------------------------------|-----------------------------------|
 | ```AWS_ACCESS_KEY_ID```     | aws access key id                 | Required                          |
 | ```AWS_SECRET_ACCESS_KEY``` | the secret key for the access key | Required                          |
