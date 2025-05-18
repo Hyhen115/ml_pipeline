@@ -63,6 +63,7 @@ def start_pipeline():
         feature_cols = data.get('feature_cols', [])
         label_col = data.get('label_col', '')
         data_types = data.get('data_types', {})
+        train_test_split = data.get('train_test_split', 0.8)
 
         # Validate required parameters
         if not feature_cols:
@@ -75,7 +76,7 @@ def start_pipeline():
             return jsonify({"error": "Data types must be specified"}), 400
 
         # Call ML pipeline
-        result = run_ml_pipeline(s3_path, feature_cols, label_col, data_types)
+        result = run_ml_pipeline(s3_path, feature_cols, label_col, data_types, train_test_split)
 
         return jsonify(result), 200
 

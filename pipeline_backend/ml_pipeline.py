@@ -5,6 +5,10 @@ from pyspark.ml import Pipeline
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.ml.tuning import ParamGridBuilder, CrossValidator
 from concurrent.futures import ThreadPoolExecutor
+from pyspark.sql.types import StringType as PySparkSQLStringType
+from pyspark.ml.regression import GBTRegressor
+# from custom_algorithms import WeightedAverageRegressor
+
 import concurrent.futures
 import logging
 import uuid
@@ -26,7 +30,7 @@ def parse_s3_path(s3_path):
     parsed = urlparse(s3_path)
     return parsed.netloc, parsed.path.lstrip('/')
 
-def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
+def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types, train_test_split):
     """
     Run a machine learning pipeline on the provided CSV data.
     
@@ -44,6 +48,7 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
     logger.info(f"Features: {feature_cols}")
     logger.info(f"Label: {label_col}")
     logger.info(f"Data types: {data_types}")
+    logger.info(f"Train-test split ratio: {train_test_split}")
 
     # Add these debug prints
     logger.info("DEBUG: AWS Environment Variables:")
@@ -102,18 +107,34 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
         # init stage as empty
         stages = []
 
+        # Handle Label Col (Mod1)
+        # The label column for regression models must be numeric.
+        # If it's a string, we add a StringIndexer for it and update its name for model use.
+        current_label_col = label_col
+        if isinstance(data_df.schema[label_col].dataType, PySparkSQLStringType):
+          indexed_label_name = f"{label_col}_indexed_label_for_regression"
+          label_indexer_stage = StringIndexer(inputCol=label_col,
+                                              outputCol=indexed_label_name,
+                                              handleInvalid="keep") # Use "error" or "keep" as appropriate
+          stages.append(label_indexer_stage)
+          current_label_col = indexed_label_name
+
         # Handle categorical features
         categorical_cols = [col for col, dtype in data_types.items() if dtype == "categorical" and col in feature_cols]
-        numerical_cols = [col for col, dtype in data_types.items() if dtype == "numerical" and col in feature_cols]  # Typo fix: "numerical" → "numerical"
+        numerical_cols = [col for col, dtype in data_types.items() if dtype == "numerical" and col in feature_cols]  
         
         logger.info(f"Categorical features: {categorical_cols}")
         logger.info(f"Numerical features: {numerical_cols}")
         
-        indexed_cols = []
-        for col in categorical_cols:
-            indexer = StringIndexer(inputCol=col, outputCol=f"{col}_indexed", handleInvalid="keep")
+        # Add StringIndexer stages for string categorical columns.
+        for col_name in categorical_cols:
+          # Check the actual datatype of the column in the DataFrame
+          column_actual_datatype = data_df.schema[col_name].dataType
+          if isinstance(column_actual_datatype, PySparkSQLStringType):
+            # If the categorical column is a string, add an indexer stage for it.
+            # The outputCol uses the "_indexed" suffix as in the original code.
+            indexer = StringIndexer(inputCol=col_name, outputCol=f"{col_name}_indexed", handleInvalid="keep")
             stages.append(indexer)
-            indexed_cols.append(f"{col}_indexed")
         
         # Handle numerical features: Impute missing values
         if numerical_cols:
@@ -127,12 +148,20 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
         else:
             numerical_cols_processed = []
         
-        # Assemble features
-        feature_cols_processed = numerical_cols_processed + indexed_cols
-        if not feature_cols_processed:
-            raise ValueError("No valid feature columns after processing")
         
-        assembler = VectorAssembler(inputCols=feature_cols_processed, outputCol="raw_features")
+        feature_cols_for_assembler = []
+        feature_cols_for_assembler.extend(numerical_cols_processed)
+
+        for col_name in categorical_cols:
+          column_actual_datatype = data_df.schema[col_name].dataType
+          if isinstance(column_actual_datatype, PySparkSQLStringType):
+            # If this categorical column was a string (and thus indexed), use its indexed name.
+            feature_cols_for_assembler.append(f"{col_name}_indexed")
+          else:
+            # If this categorical column was not a string (i.e., it's numeric), use its original name.
+            feature_cols_for_assembler.append(col_name)
+        
+        assembler = VectorAssembler(inputCols=feature_cols_for_assembler, outputCol="raw_features")
         stages.append(assembler)
         
         # Scale numerical features (with centering)
@@ -140,14 +169,22 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
         stages.append(scaler)
         
         # Define models
-        lr = LinearRegression(labelCol=label_col, predictionCol="prediction", featuresCol="features")
-        rf = RandomForestRegressor(labelCol=label_col, predictionCol="prediction", featuresCol="features")
-        dt = DecisionTreeRegressor(labelCol=label_col, predictionCol="prediction", featuresCol="features")
-        
+        lr = LinearRegression(labelCol=current_label_col, predictionCol="prediction", featuresCol="features")
+        rf = RandomForestRegressor(labelCol=current_label_col, predictionCol="prediction", featuresCol="features")
+        dt = DecisionTreeRegressor(labelCol=current_label_col, predictionCol="prediction", featuresCol="features")
+        gbt = GBTRegressor(labelCol=current_label_col, predictionCol="prediction", featuresCol="features")
+        # wa = WeightedAverageRegressor(labelCol=current_label_col, featuresCol="features")
+        # wa = WeightedAverageRegressor(labelCol=current_label_col, predictionCol="prediction", 
+        #                     featuresCol="features", regularization=0.01, useInteractions=True)
+
+
         # Create pipelines
         lr_pipeline = Pipeline(stages=stages + [lr])
         rf_pipeline = Pipeline(stages=stages + [rf])
         dt_pipeline = Pipeline(stages=stages + [dt])
+        gbt_pipeline = Pipeline(stages=stages + [gbt])
+        # wa_pipeline = Pipeline(stages=stages + [wa])
+
         
         # Hyperparameter grids for tuning
         lr_param_grid = ParamGridBuilder() \
@@ -164,8 +201,18 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
             .addGrid(dt.maxDepth, [5, 10]) \
             .build()
         
+        gbt_param_grid = ParamGridBuilder() \
+            .addGrid(gbt.maxDepth, [5, 8]) \
+            .addGrid(gbt.maxIter, [10, 20]) \
+            .build()
+        
+        # wa_param_grid = ParamGridBuilder() \
+        #     .addGrid(wa.regularization, [0.01, 0.1]) \
+        #     .addGrid(wa.useInteractions, [True, False]) \
+        #     .build()
+        
         # Evaluator
-        evaluator = RegressionEvaluator(labelCol=label_col, predictionCol="prediction", metricName="rmse")
+        evaluator = RegressionEvaluator(labelCol=current_label_col, predictionCol="prediction", metricName="rmse")
         
         # Cross-validators for hyperparameter tuning
         logger.info("Setting up cross-validation")
@@ -189,9 +236,23 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
             estimatorParamMaps=dt_param_grid,
             numFolds=3
         )
+
+        gbt_crossval = CrossValidator(
+            estimator=gbt_pipeline,
+            evaluator=evaluator,
+            estimatorParamMaps=gbt_param_grid,
+            numFolds=3
+        )
+
+        # wa_crossval = CrossValidator(
+        #     estimator=wa_pipeline,
+        #     evaluator=evaluator,
+        #     estimatorParamMaps=wa_param_grid,
+        #     numFolds=3
+        # )
         
         # Split data
-        train_df, test_df = data_df.randomSplit([0.8, 0.2], seed=42)
+        train_df, test_df = data_df.randomSplit([train_test_split, 1 - train_test_split], seed=42)
         train_df.cache()
         test_df.cache()
         
@@ -204,7 +265,9 @@ def run_ml_pipeline(s3_input_path, feature_cols, label_col, data_types):
             futures = [
                 executor.submit(_train_model, lr_crossval, train_df, "Linear Regression"),
                 executor.submit(_train_model, rf_crossval, train_df, "Random Forest"),
-                executor.submit(_train_model, dt_crossval, train_df, "Decision Tree")
+                executor.submit(_train_model, dt_crossval, train_df, "Decision Tree"),
+                executor.submit(_train_model, gbt_crossval, train_df, "Gradient Boosted Trees"),
+                # executor.submit(_train_model, wa_crossval, train_df, "Weighted Average Regressor")
             ]
             
             # Collect results as they complete

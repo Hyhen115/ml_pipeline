@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, Select, MenuItem, Button } from '@mui/material';
+import { 
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, 
+  Paper, Typography, Select, MenuItem, Button, Box, Slider 
+} from '@mui/material';
 
 export default function CSVTable({ data, rowsToShow, onSubmit }) {
   const [columnSelections, setColumnSelections] = useState(
@@ -9,6 +12,9 @@ export default function CSVTable({ data, rowsToShow, onSubmit }) {
   const [columnDataTypes, setColumnDataTypes] = useState(
     data.length > 0 ? Object.keys(data[0]).reduce((acc, key) => ({ ...acc, [key]: 'numerical' }), {}) : {}
   );
+  
+  // Change to use decimal format internally (0.8 instead of 80)
+  const [trainSplit, setTrainSplit] = useState(0.8);
 
   const handleSelectionChange = (column, value) => {
     setColumnSelections((prev) => {
@@ -34,6 +40,12 @@ export default function CSVTable({ data, rowsToShow, onSubmit }) {
       [column]: value,
     }));
   };
+  
+  // Update slider handler to work with decimals
+  const handleTrainSplitChange = (event, newValue) => {
+    // Convert percentage to decimal (slider shows percentages, but we store decimals)
+    setTrainSplit(newValue / 100);
+  };
 
   const handleSubmit = () => {
     const featureCols = Object.keys(columnSelections).filter((col) => columnSelections[col] === 'Feature');
@@ -44,11 +56,12 @@ export default function CSVTable({ data, rowsToShow, onSubmit }) {
       return;
     }
 
-    // Pass the selected columns and data types to the parent component
+    // Pass the selected columns, data types, and train/test split to the parent component
     onSubmit({
       featureCols,
       labelCol,
       dataTypes: columnDataTypes,
+      trainTestSplit: trainSplit // Now this will be a decimal value (0.8, etc.)
     });
   };
 
@@ -64,6 +77,56 @@ export default function CSVTable({ data, rowsToShow, onSubmit }) {
       <Typography variant="body2" align="center" color="textSecondary" sx={{ mt: 2 }}>
         Showing the first {rowsToShow} rows of the dataset:
       </Typography>
+      
+      {/* Updated Train/Test Split Slider Box */}
+      <Box 
+        sx={{ 
+          mt: 3, 
+          mb: 3, 
+          p: 2, 
+          borderRadius: 2,
+          bgcolor: 'rgba(25, 118, 210, 0.05)', 
+          border: '1px solid rgba(25, 118, 210, 0.2)'
+        }}
+      >
+        <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+          Data Split Configuration
+        </Typography>
+        <Typography variant="body2" color="text.secondary" gutterBottom>
+          Adjust the ratio of training data to testing data:
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+          <Typography variant="body2" sx={{ minWidth: '45px', fontWeight: 'bold' }}>
+            {/* Display as percentage to user */}
+            {Math.round(trainSplit * 100)}%
+          </Typography>
+          <Slider
+            // Convert decimal to percentage for the slider
+            value={trainSplit * 100}
+            onChange={handleTrainSplitChange}
+            aria-labelledby="train-test-split-slider"
+            valueLabelDisplay="auto"
+            step={5}
+            marks={[
+              { value: 50, label: '50%' },
+              { value: 70, label: '70%' },
+              { value: 80, label: '80%' },
+              { value: 90, label: '90%' }
+            ]}
+            min={50}
+            max={90}
+            sx={{ mx: 2 }}
+          />
+          <Typography variant="body2" sx={{ color: 'text.secondary', minWidth: '130px' }}>
+            {/* Display both formats for clarity */}
+            Train: {Math.round(trainSplit * 100)}% ({trainSplit.toFixed(2)})
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          API will receive value: {trainSplit.toFixed(2)}
+        </Typography>
+      </Box>
+      
       <TableContainer component={Paper} sx={{ mt: 2, maxHeight: 400 }}>
         <Table stickyHeader>
           <TableHead>
@@ -124,7 +187,12 @@ export default function CSVTable({ data, rowsToShow, onSubmit }) {
           </TableBody>
         </Table>
       </TableContainer>
-      <Button variant="contained" color="primary" onClick={handleSubmit} sx={{ mt: 2 }}>
+      <Button 
+        variant="contained" 
+        color="primary" 
+        onClick={handleSubmit} 
+        sx={{ mt: 2 }}
+      >
         Submit
       </Button>
     </>

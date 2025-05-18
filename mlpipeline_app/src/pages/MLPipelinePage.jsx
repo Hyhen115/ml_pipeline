@@ -5,6 +5,8 @@ import CSVTable from '../components/CSVTable';
 import LoadingBox from '../components/LoadingBox'; // Import the new LoadingBox component
 import axios from 'axios'; // Add axios for easier multipart/form upload
 
+const API_URL = import.meta.env.VITE_API_URL;
+
 export default function MLPipelinePage() {
   const [fileName, setFileName] = useState(null);
   const [tableData, setTableData] = useState([]);
@@ -52,7 +54,7 @@ export default function MLPipelinePage() {
 
   const uploadToS3 = async (file) => {
     // 1. Request presigned POST URL from backend
-    const res = await fetch('http://44.210.146.47:5001/generate_upload_url', {
+    const res = await fetch(`${API_URL}/generate_upload_url`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: file.name }),
@@ -74,6 +76,7 @@ export default function MLPipelinePage() {
     // 4. Return the S3 key for backend use
     return presigned.fields.key;
   };
+  
 
   const handleDragOver = (event) => {
     event.preventDefault();
@@ -98,7 +101,8 @@ export default function MLPipelinePage() {
     }
   };
 
-  const handleSubmit = async ({ featureCols, labelCol, dataTypes }) => {
+  // Update the handleSubmit function to include trainTestSplit parameter
+  const handleSubmit = async ({ featureCols, labelCol, dataTypes, trainTestSplit }) => {
     if (!fileName || !labelCol || featureCols.length === 0 || !s3Key) {
       alert('Please ensure you have selected a label, features, uploaded a CSV file, and the file is uploaded to S3.');
       return;
@@ -106,7 +110,7 @@ export default function MLPipelinePage() {
 
     setLoading(true);
     try {
-      const response = await fetch('http://44.210.146.47:5001/start_pipeline', {
+      const response = await fetch(`${API_URL}/start_pipeline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -114,6 +118,7 @@ export default function MLPipelinePage() {
           feature_cols: featureCols,
           label_col: labelCol,
           data_types: dataTypes,
+          train_test_split: trainTestSplit,
         }),
       });
 
@@ -176,7 +181,7 @@ export default function MLPipelinePage() {
                   sx={{ mt: 2, display: 'block', margin: '20px auto' }}
                   onClick={() => {
                     // Direct download of zip file
-                    window.location.href = `http://44.210.146.47:5001/download_model_zip?model_path=${encodeURIComponent(results.model_path)}`;
+                    window.location.href = `${API_URL}/download_model_zip?model_path=${encodeURIComponent(results.model_path)}`;
                   }}
                 >
                   Download Trained Model (ZIP)
